@@ -1,6 +1,6 @@
 # RideNow - Microservices Ride-Sharing Platform
 
-A microservices-based ride-sharing application built with FastAPI, demonstrating distributed system architecture with independent services for users, pricing, and ride management.
+A microservices-based ride-sharing application built with FastAPI, demonstrating distributed system architecture with independent services for users, pricing, payment processing, and ride management.
 
 ## 📋 Table of Contents
 
@@ -12,15 +12,16 @@ A microservices-based ride-sharing application built with FastAPI, demonstrating
 - [API Documentation](#api-documentation)
 - [Project Structure](#project-structure)
 - [Technologies Used](#technologies-used)
-- [Future Services](#future-services)
+- [Service Communication Flow](#service-communication-flow)
+- [Testing](#testing)
 
 ## 🎯 Overview
 
 RideNow is a microservices-based ride-sharing platform that separates concerns into independent services:
-- **Users Service**: Manages drivers and their availability
-- **Pricing Service**: Handles zone-based pricing rules
-- **Payment Service**: (Planned) Payment processing
-- **Ride Service**: (Planned) Ride booking and management
+- **Users Service** (Port 8001): Manages drivers and their availability
+- **Pricing Service** (Port 8002): Handles zone-based pricing rules
+- **Payment Service** (Port 8003): Payment authorization and capture
+- **Ride Service** (Port 8004): Orchestrates ride booking by coordinating with other services
 
 Each service operates independently with its own database and API endpoints, communicating via HTTP REST APIs.
 
@@ -30,8 +31,8 @@ Each service operates independently with its own database and API endpoints, com
 RideNow/
 ├── users-service/      # Driver management (Port 8001)
 ├── pricing-service/    # Pricing rules (Port 8002)
-├── payment-service/    # Payment processing (Planned)
-└── ride-service/       # Ride booking (Planned)
+├── payment-service/    # Payment processing (Port 8003)
+└── ride-service/       # Ride orchestration (Port 8004)
 ```
 
 ### Service Communication
@@ -39,6 +40,7 @@ RideNow/
 - Each service has its own SQLite database
 - Services can be scaled independently
 - Health check endpoints available for monitoring
+- Ride Service orchestrates the booking flow by calling other services
 
 ## 🔧 Prerequisites
 
@@ -116,9 +118,37 @@ uvicorn pricing_service_app:app --reload --port 8002
 
 **Health Check:** http://localhost:8002/health
 
+### Payment Service (Port 8003)
+
+Navigate to the payment service directory and start the server:
+
+```bash
+cd ridenow/payment-service
+uvicorn payment_service_app:app --reload --port 8003
+```
+
+**Swagger Documentation:** http://localhost:8003/docs
+
+**Health Check:** http://localhost:8003/health
+
+### Ride Service (Port 8004)
+
+Navigate to the ride service directory and start the server:
+
+```bash
+cd ridenow/ride-service
+uvicorn ride_service_app:app --reload --port 8004
+```
+
+**Swagger Documentation:** http://localhost:8004/docs
+
+**Health Check:** http://localhost:8004/health
+
 ### Running Multiple Services
 
 Open separate terminal windows/tabs for each service, or use a process manager like `pm2` or `supervisor`.
+
+**Note:** The Ride Service requires all other services to be running, as it orchestrates the booking flow.
 
 ## 📚 API Documentation
 
@@ -185,12 +215,74 @@ curl -X POST "http://localhost:8002/prices" \
 curl "http://localhost:8002/price?from=A&to=B"
 ```
 
+### Payment Service API
+
+#### Health Check
+- **GET** `/health`
+  - Returns service status
+
+#### Payment Management
+- **POST** `/payments/authorize`
+  - Authorize a payment for a ride
+  - Request body: `{ "ride_id": int, "amount": float, "currency": "CAD" }`
+  - Returns: `{ "payment_id": int, "status": "AUTHORIZED" }`
+  
+- **POST** `/payments/capture`
+  - Capture a previously authorized payment
+  - Request body: `{ "payment_id": int }`
+  - Returns: `{ "payment_id": int, "status": "CAPTURED" }`
+  
+- **GET** `/payments/{payment_id}`
+  - Get payment details by ID
+
+**Example:**
+```bash
+# Authorize a payment
+curl -X POST "http://localhost:8003/payments/authorize" \
+  -H "Content-Type: application/json" \
+  -d '{"ride_id": 1, "amount": 12.50, "currency": "CAD"}'
+
+# Capture a payment
+curl -X POST "http://localhost:8003/payments/capture" \
+  -H "Content-Type: application/json" \
+  -d '{"payment_id": 1}'
+```
+
+### Ride Service API
+
+#### Health Check
+- **GET** `/health`
+  - Returns service status
+
+#### Ride Management
+- **POST** `/rides`
+  - Create a new ride request
+  - This endpoint orchestrates the entire booking flow:
+    1. Finds an available driver in the requested zone
+    2. Gets the price for the route
+    3. Creates the ride record
+    4. Authorizes payment
+  - Request body: `{ "passenger_name": "string", "from_zone": "string", "to_zone": "string" }`
+  - Returns: Complete ride details with driver, amount, and payment information
+  
+- **GET** `/rides/{ride_id}`
+  - Get ride details by ID
+
+**Example:**
+```bash
+# Create a ride (requires all other services to be running)
+curl -X POST "http://localhost:8004/rides" \
+  -H "Content-Type: application/json" \
+  -d '{"passenger_name": "Alice", "from_zone": "A", "to_zone": "B"}'
+```
+
 ## 📁 Project Structure
 
 ```
 Tp3/
 ├── README.md
-├── docker-compose.yml          # Docker configuration (planned)
+├── docker-compose.yml          # Docker configuration
+├── .gitignore                  # Git ignore rules
 ├── ridenow/
 │   ├── users-service/
 │   │   ├── users_service_app.py    # Users service application
@@ -198,9 +290,13 @@ Tp3/
 │   ├── pricing-service/
 │   │   ├── pricing_service_app.py  # Pricing service application
 │   │   └── pricing.db              # SQLite database (auto-created)
-│   ├── payment-service/            # (Planned)
-│   └── ride-service/               # (Planned)
-└── .venv/                          # Virtual environment
+│   ├── payment-service/
+│   │   ├── payment_service_app.py  # Payment service application
+│   │   └── payment.db              # SQLite database (auto-created)
+│   └── ride-service/
+│       ├── ride_service_app.py     # Ride orchestration service
+│       └── rides.db                # SQLite database (auto-created)
+└── .venv/                          # Virtual environment (not in git)
 ```
 
 ## 🛠️ Technologies Used
@@ -211,43 +307,68 @@ Tp3/
 - **Pydantic**: Data validation using Python type annotations
 - **SQLite**: Lightweight database for each service
 
-## 🔮 Future Services
+## 🔄 Service Communication Flow
 
-### Payment Service
-- Payment processing
-- Transaction management
-- Payment history
+When a ride is requested through the Ride Service, the following orchestration occurs:
 
-### Ride Service
-- Ride booking
-- Ride status management
-- Integration with Users and Pricing services
+1. **Ride Request** → `POST /rides` to Ride Service
+2. **Find Driver** → Ride Service calls `GET /drivers?available=true&zone={zone}` on Users Service
+3. **Get Price** → Ride Service calls `GET /price?from={zone}&to={zone}` on Pricing Service
+4. **Create Ride** → Ride Service creates ride record in its database
+5. **Authorize Payment** → Ride Service calls `POST /payments/authorize` on Payment Service
+6. **Return Ride** → Ride Service returns complete ride details with driver, price, and payment info
+
+This demonstrates a typical microservices orchestration pattern where one service coordinates multiple others to complete a business transaction.
 
 ## 🧪 Testing
 
 ### Manual Testing
 
-1. **Start both services:**
+1. **Start all services:**
    ```bash
-   # Terminal 1
+   # Terminal 1 - Users Service
    cd ridenow/users-service
    uvicorn users_service_app:app --reload --port 8001
    
-   # Terminal 2
+   # Terminal 2 - Pricing Service
    cd ridenow/pricing-service
    uvicorn pricing_service_app:app --reload --port 8002
+   
+   # Terminal 3 - Payment Service
+   cd ridenow/payment-service
+   uvicorn payment_service_app:app --reload --port 8003
+   
+   # Terminal 4 - Ride Service
+   cd ridenow/ride-service
+   uvicorn ride_service_app:app --reload --port 8004
    ```
 
-2. **Test Users Service:**
-   - Visit http://localhost:8001/docs for interactive API documentation
-   - Create a driver: `POST /drivers`
-   - List drivers: `GET /drivers`
-   - Update availability: `PATCH /drivers/{id}/availability`
+2. **Setup Test Data:**
+   ```bash
+   # Create a driver in zone A
+   curl -X POST "http://localhost:8001/drivers" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "John Doe", "zone": "A", "available": true}'
+   
+   # Create a pricing rule for A to B
+   curl -X POST "http://localhost:8002/prices" \
+     -H "Content-Type: application/json" \
+     -d '{"from_zone": "A", "to_zone": "B", "amount": 12.50}'
+   ```
 
-3. **Test Pricing Service:**
-   - Visit http://localhost:8002/docs for interactive API documentation
-   - Create pricing rule: `POST /prices`
-   - Get price: `GET /price?from=A&to=B`
+3. **Test Complete Ride Flow:**
+   ```bash
+   # Create a ride (this orchestrates all services)
+   curl -X POST "http://localhost:8004/rides" \
+     -H "Content-Type: application/json" \
+     -d '{"passenger_name": "Alice", "from_zone": "A", "to_zone": "B"}'
+   ```
+
+4. **Interactive API Documentation:**
+   - Users Service: http://localhost:8001/docs
+   - Pricing Service: http://localhost:8002/docs
+   - Payment Service: http://localhost:8003/docs
+   - Ride Service: http://localhost:8004/docs
 
 ## 📝 Notes
 
@@ -258,14 +379,17 @@ Tp3/
 
 ## 🤝 Contributing
 
-This is a learning project demonstrating microservices architecture. Feel free to extend it with:
-- Additional services
-- Service-to-service communication
-- Docker containerization
-- Database migrations
+This is a learning project demonstrating microservices architecture. Potential enhancements:
+- Docker containerization (docker-compose.yml exists but needs configuration)
+- Database migrations (Alembic)
 - Unit and integration tests
-- API gateway
-- Service discovery
+- API gateway for unified entry point
+- Service discovery (Consul, Eureka)
+- Message queue for async communication (RabbitMQ, Kafka)
+- Distributed tracing (Jaeger, Zipkin)
+- Circuit breakers for resilience
+- Rate limiting
+- Authentication and authorization
 
 ## 📄 License
 
