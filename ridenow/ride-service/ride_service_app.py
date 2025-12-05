@@ -35,9 +35,6 @@ Base.metadata.create_all(bind=engine)
 # -----------------------------------------------------
 # Config — URLs des autres services
 # -----------------------------------------------------
-#USERS_URL = "http://localhost:8001"
-#PRICING_URL = "http://localhost:8002"
-#PAYMENT_URL = "http://localhost:8003"
 USERS_URL = "http://users-service:8001"
 PRICING_URL = "http://pricing-service:8002"
 PAYMENT_URL = "http://payment-service:8003"
